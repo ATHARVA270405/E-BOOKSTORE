@@ -24,12 +24,13 @@
             { id: 'Philosophy', label: 'Philosophy', icon: '💭' }
         ];
 
-       window.onload = () => {
+    window.onload = () => {
     lucide.createIcons();
     renderCategories();
-    fetchBooks(currentCategory);
-    autoLoginFromStorage(); // 🔥 AUTO LOGIN + STREAK
+    fetchBooks(mapCategoryToQuery(currentCategory), 0, false);
+    autoLoginFromStorage();
 };
+
 function mapCategoryToQuery(cat) {
     const map = {
         'Trending': 'bestseller OR popular books',
@@ -42,53 +43,7 @@ function mapCategoryToQuery(cat) {
 }
 
 
-        // --- STREAK LOGIC ---
-        function updateStreak() {
-            const now = new Date();
-            const todayStr = now.toDateString();
-            
-            // Get data from storage
-            let streakData = JSON.parse(localStorage.getItem('ebook_streak_v1')) || { count: 0, lastLogin: null };
-            
-            if (!streakData.lastLogin) {
-                // First time login
-                streakData.count = 1;
-                streakData.lastLogin = todayStr;
-                showToast("First day streak! 🔥");
-            } else {
-                const lastDate = new Date(streakData.lastLogin);
-                const diffTime = now - lastDate;
-                const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-
-                if (todayStr === streakData.lastLogin) {
-                    // Already logged in today - do nothing to count
-                } else if (diffDays === 1) {
-                    // Consecutive day
-                    streakData.count += 1;
-                    streakData.lastLogin = todayStr;
-                    showToast(`Streak increased! ${streakData.count} days 🔥`);
-                } else {
-                    // Missed a day (or more) - Reset
-                    streakData.count = 1;
-                    streakData.lastLogin = todayStr;
-                    showToast("Streak reset! Let's start again 🔥");
-                }
-            }
-
-            localStorage.setItem('ebook_streak_v1', JSON.stringify(streakData));
-            refreshStreakUI(streakData.count);
-        }
-
-        function refreshStreakUI(count) {
-            const streakContainer = document.getElementById('streak-container');
-            const streakCount = document.getElementById('streak-count');
-            const libStreak = document.getElementById('lib-streak-val');
-            
-            streakContainer.classList.remove('hidden');
-            streakCount.innerText = count;
-            if(libStreak) libStreak.innerText = count;
-        }
-
+        
         // --- AUTH & NAVIGATION ---
         function handleLogin(role) {
             currentUser = { role: role };
@@ -103,9 +58,8 @@ function mapCategoryToQuery(cat) {
                 updateAdminView();
             }
 
-            // Run Streak Logic on login
-            updateStreak();
-            lucide.createIcons();
+          
+        
         }
 
        function toggleAuth(state) {
@@ -116,7 +70,7 @@ function mapCategoryToQuery(cat) {
         document.getElementById('auth-controls').classList.remove('hidden');
         document.getElementById('admin-nav-btn').classList.add('hidden');
         document.getElementById('nav-library-btn').classList.add('hidden');
-        document.getElementById('streak-container').classList.add('hidden');
+        
         switchView('home');
         showToast("Signed out");
     }
@@ -237,7 +191,8 @@ function mapCategoryToQuery(cat) {
                 const btn = document.getElementById(`filter-${t}`);
                 btn.className = (t === type) ? 'text-left px-4 py-2.5 rounded-xl text-sm font-bold bg-amber-600 text-white shadow-md' : 'text-left px-4 py-2.5 rounded-xl text-sm font-bold text-slate-600 hover:bg-orange-50';
             });
-            fetchBooks(mapCategoryToQuery(currentCategory));
+           startIndex = 0;
+                 fetchBooks(mapCategoryToQuery(currentCategory), 0, false);
 
         }
 
@@ -259,8 +214,9 @@ function mapCategoryToQuery(cat) {
             const date = item.volumeInfo?.publishedDate;
             if (!date) return false;
 
-            const year = parseInt(date.slice(0, 4));
-            return year >= 2000; // 🔥 keep only modern ebooks
+           const year = parseInt(date);
+return !isNaN(year) && year >= 1995;
+
         })
         .map((item, idx) => {
             const isFreeByAPI = item.saleInfo?.saleability === 'FREE_BOOKS';
@@ -376,7 +332,13 @@ function mapCategoryToQuery(cat) {
             lucide.createIcons();
         }
 
-        function handleCategoryClick(catId) { currentCategory = catId; renderCategories(); fetchBooks(catId, 0, false); }
+ function handleCategoryClick(catId) {
+    currentCategory = catId;
+    renderCategories();
+    fetchBooks(mapCategoryToQuery(catId), 0, false);
+}
+
+
         function handleSearch(e) { e.preventDefault(); fetchBooks(document.getElementById('search-input').value); }
         
         function renderCategories() {
@@ -399,7 +361,9 @@ function mapCategoryToQuery(cat) {
         function closeContactModal() { document.getElementById('contact-modal').classList.add('hidden'); }
         function handleContactAdmin(e) { e.preventDefault(); showToast("Inquiry sent!"); closeContactModal(); }
         function handlePublish(e) { e.preventDefault(); showToast("Manuscript sent!"); e.target.reset(); }
-        function loadMore() { fetchBooks(currentCategory, startIndex + LOAD_COUNT, true); }
+ function loadMore() {
+    fetchBooks(mapCategoryToQuery(currentCategory), startIndex + LOAD_COUNT, true);
+}
 
         // Chatbot Logic
         function toggleChatbot() {
@@ -475,3 +439,4 @@ function mapCategoryToQuery(cat) {
 
     return "I'm here to help 📚 Try asking about free books, latest reads, or your library!";
 }
+
