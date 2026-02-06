@@ -8,7 +8,9 @@ let accessFilter = 'all';
 let startIndex = 0;
 const LOAD_COUNT = 40;
 const ADMIN_STORAGE_KEY = "libris_local_db";
+const AUTHOR_BOOKS_KEY = "author_published_books";
 let localBooks = JSON.parse(localStorage.getItem(ADMIN_STORAGE_KEY)) || [];
+let authorBooks = JSON.parse(localStorage.getItem(AUTHOR_BOOKS_KEY)) || [];
 
 // To prevent duplicate fetching
 let lastQuery = '';
@@ -25,7 +27,8 @@ const CATEGORIES = [
 window.onload = () => {
     lucide.createIcons();
     renderCategories();
-    renderManualBooks(); // Load manual books
+    renderManualBooks();
+    loadAuthorBooks();
     fetchBooks(mapCategoryToQuery(currentCategory), 0, false);
     autoLoginFromStorage();
 };
@@ -51,7 +54,7 @@ function mapCategoryToQuery(cat) {
 
 // --- AUTH & NAVIGATION ---
 function handleLogin(role) {
-    currentUser = { role: role };
+    currentUser = { role: role, name: role === 'Author' ? 'Author Name' : 'Reader' };
     document.getElementById('user-profile').classList.remove('hidden');
     document.getElementById('auth-controls').classList.add('hidden');
     document.getElementById('user-role-badge').innerText = role;
@@ -98,6 +101,133 @@ function switchView(view) {
     if(view === 'library') renderLibrary();
     if(view === 'admin') updateAdminView();
     window.scrollTo(0,0);
+}
+
+// --- PUBLISH FUNCTION - Fixed PDF handling ---
+function handlePublish(e) { 
+    e.preventDefault(); 
+    
+    if (!currentUser) {
+        showToast("Please sign in to publish books");
+        window.location.href = 'login.html';
+        return;
+    }
+    
+    const form = e.target;
+    
+    // Get form values
+    const title = form.querySelector('input[type="text"]').value;
+    const listingType = document.getElementById('listingType').value;
+    let price = 'Free';
+    if (listingType === 'Paid') {
+        const priceInput = document.getElementById('bookPrice');
+        price = priceInput.value ? '₹' + priceInput.value : '₹199';
+    }
+    
+    // Get files
+    const pdfFileInput = form.querySelector('input[type="file"][accept="application/pdf"]');
+    const coverFileInput = form.querySelector('input[type="file"][accept="image/*"]');
+    
+    const pdfFile = pdfFileInput.files[0];
+    const coverFile = coverFileInput.files[0];
+    
+    if (!pdfFile) {
+        showToast("Please upload a PDF file");
+        return;
+    }
+    
+    // Validate file size (max 20MB)
+    if (pdfFile.size > 20 * 1024 * 1024) {
+        showToast("PDF file is too large. Max size is 20MB");
+        return;
+    }
+    
+    // Show loading
+    const submitBtn = form.querySelector('button[type="submit"]');
+    const originalText = submitBtn.innerHTML;
+    submitBtn.innerHTML = '<span class="flex items-center justify-center gap-2"><i data-lucide="loader" class="w-4 h-4 animate-spin"></i> Uploading...</span>';
+    submitBtn.disabled = true;
+    lucide.createIcons();
+    
+    // Process files
+    const reader = new FileReader();
+    
+    reader.onload = function(e) {
+        // PDF data is ready
+        const pdfData = e.target.result;
+        
+        let coverData = 'https://images.unsplash.com/photo-1543004218-ee14110497f9?q=80&w=400'; // Default cover
+        
+        if (coverFile) {
+            // If cover is uploaded, process it
+            const coverReader = new FileReader();
+            coverReader.onload = function(e2) {
+                coverData = e2.target.result;
+                saveBookToStorage(title, listingType, price, pdfData, coverData);
+            };
+            coverReader.readAsDataURL(coverFile);
+        } else {
+            // Use default cover
+            saveBookToStorage(title, listingType, price, pdfData, coverData);
+        }
+    };
+    
+    reader.onerror = function() {
+        showToast("Error reading PDF file");
+        submitBtn.innerHTML = originalText;
+        submitBtn.disabled = false;
+    };
+    
+    reader.readAsDataURL(pdfFile);
+}
+
+function saveBookToStorage(title, listingType, price, pdfData, coverData) {
+    // Create new book object
+    const newBook = {
+        id: 'auth-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+        title: title,
+        author: currentUser.name || "Anonymous Author",
+        listingType: listingType,
+        price: price,
+        pdfData: pdfData,
+        coverImage: coverData,
+        date: new Date().toLocaleDateString('en-IN', { 
+            day: 'numeric', 
+            month: 'short', 
+            year: 'numeric' 
+        }),
+        timestamp: Date.now(),
+        views: 0,
+        published: true
+    };
+    
+    // Add to author books
+    authorBooks.unshift(newBook);
+    localStorage.setItem(AUTHOR_BOOKS_KEY, JSON.stringify(authorBooks));
+    
+    // Reset button
+    const submitBtn = document.querySelector('#publish-view button[type="submit"]');
+    submitBtn.innerHTML = 'Book Published Successfully!';
+    submitBtn.className = 'w-full py-5 bg-green-600 text-white font-bold rounded-2xl shadow-xl shadow-green-200';
+    
+    // Reset form after delay
+    setTimeout(() => {
+        document.querySelector('#publish-view form').reset();
+        submitBtn.innerHTML = 'Publish Book Now';
+        submitBtn.className = 'w-full py-5 bg-slate-900 text-white font-bold rounded-2xl hover:bg-amber-600 transition-all shadow-xl shadow-slate-200';
+        submitBtn.disabled = false;
+        
+        // Reset price field
+        const priceField = document.getElementById('priceField');
+        priceField.classList.add('hidden');
+        
+        showToast("✅ Book published successfully!");
+        
+        // If on author page, refresh it
+        if (window.location.pathname.includes('author.html')) {
+            window.location.reload();
+        }
+    }, 2000);
 }
 
 // --- ADMIN & LIBRARY FUNCTIONS ---
@@ -491,12 +621,6 @@ function handleContactAdmin(e) {
     closeContactModal(); 
 }
 
-function handlePublish(e) { 
-    e.preventDefault(); 
-    showToast("Manuscript sent!"); 
-    e.target.reset(); 
-}
-
 function loadMore() {
     fetchBooks(mapCategoryToQuery(currentCategory), startIndex, true);
 }
@@ -580,13 +704,7 @@ function openLocalPdf(bookId) {
     const book = localBooks.find(b => b.id === bookId);
     
     if (book && book.pdfData) {
-        const newTab = window.open();
-        newTab.document.write(`
-            <title>${book.name}</title>
-            <body style="margin:0; background:#1e293b; display:flex; justify-content:center;">
-                <embed width="100%" height="100%" src="${book.pdfData}" type="application/pdf">
-            </body>
-        `);
+        window.openPdfViewer(book.pdfData, book.name);
     } else {
         alert("File not found!");
     }
@@ -597,3 +715,77 @@ function renderManualBooks() {
     manualBooks = JSON.parse(localStorage.getItem('lumina_manual_books_v2') || '[]');
     localBooks = JSON.parse(localStorage.getItem(ADMIN_STORAGE_KEY)) || [];
 }
+
+// Load author books
+function loadAuthorBooks() {
+    authorBooks = JSON.parse(localStorage.getItem(AUTHOR_BOOKS_KEY)) || [];
+}
+
+// Global function to open PDF viewer
+window.openPdfViewer = function(pdfData, title) {
+    const newTab = window.open();
+    newTab.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>${title}</title>
+            <style>
+                body { 
+                    margin: 0; 
+                    padding: 0; 
+                    background: #1e293b;
+                    font-family: Arial, sans-serif;
+                }
+                .pdf-container { 
+                    width: 100%; 
+                    height: 100vh; 
+                    display: flex;
+                    flex-direction: column;
+                }
+                .pdf-header { 
+                    background: white; 
+                    padding: 1rem 1.5rem; 
+                    display: flex; 
+                    justify-content: space-between;
+                    align-items: center;
+                    border-bottom: 1px solid #e5e7eb;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                }
+                .pdf-header h2 { 
+                    margin: 0; 
+                    font-size: 1.25rem;
+                    color: #1e293b;
+                    font-weight: 600;
+                }
+                .close-btn { 
+                    background: #ef4444; 
+                    color: white; 
+                    border: none; 
+                    padding: 0.5rem 1rem;
+                    border-radius: 0.375rem;
+                    cursor: pointer;
+                    font-weight: 500;
+                    transition: background 0.2s;
+                }
+                .close-btn:hover { 
+                    background: #dc2626;
+                }
+                iframe {
+                    flex: 1;
+                    width: 100%;
+                    border: none;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="pdf-container">
+                <div class="pdf-header">
+                    <h2>${title}</h2>
+                    <button class="close-btn" onclick="window.close()">Close</button>
+                </div>
+                <iframe src="${pdfData}"></iframe>
+            </div>
+        </body>
+        </html>
+    `);
+};
