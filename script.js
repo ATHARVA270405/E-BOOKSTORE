@@ -36,12 +36,37 @@ window.onload = () => {
     loadAuthorBooks();
     fetchBooks(CATEGORIES[0].query, 0, false);
     
+    
     // Initialize streak if user is logged in
     if (currentUser) {
         initializeStreak();
+        updateStreakUI(getCurrentStreak()); // Add this line
     }
+    
+    // Also update streak display on page load
+    updateStreakUIOnLoad(); // Add new function
 };
+// Add this function after initializeStreak function
+function updateStreakUIOnLoad() {
+    if (!currentUser) {
+        // Hide all streak displays if no user
+        const streakContainer = document.getElementById('streak-container');
+        if (streakContainer) streakContainer.classList.add('hidden');
+        return;
+    }
+    
+    // Get current streak and update UI
+    const streakData = JSON.parse(localStorage.getItem(STREAK_STORAGE_KEY) || '{}');
+    const userStreak = streakData[currentUser.uid] || { currentStreak: 0 };
+    updateStreakUI(userStreak.currentStreak);
+}
 
+function getCurrentStreak() {
+    if (!currentUser) return 0;
+    const streakData = JSON.parse(localStorage.getItem(STREAK_STORAGE_KEY) || '{}');
+    const userStreak = streakData[currentUser.uid] || { currentStreak: 0 };
+    return userStreak.currentStreak;
+}
 // ========== GOOGLE BOOKS API FUNCTIONS ==========
 async function fetchBooks(query, index = 0, append = false) {
     const grid = document.getElementById('book-grid');
@@ -177,20 +202,40 @@ async function fetchBooks(query, index = 0, append = false) {
 }
 
 // ========== STREAK SYSTEM ==========
+// ========== EMAIL-BASED STREAK SYSTEM (NO FIREBASE UID) ==========
+// Replace your streak functions in script.js with these
+
 function initializeStreak() {
-    if (!currentUser) return;
+    if (!currentUser) {
+        console.log("❌ No user - cannot initialize streak");
+        return;
+    }
+    
+    // Use EMAIL as the unique identifier
+    const userEmail = currentUser.email;
+    if (!userEmail) {
+        console.log("❌ No email found");
+        return;
+    }
+    
+    console.log("🔥 Initializing streak for email:", userEmail);
     
     const today = new Date().toDateString();
     const streakData = JSON.parse(localStorage.getItem(STREAK_STORAGE_KEY) || '{}');
-    const userStreak = streakData[currentUser.uid] || {
+    const userStreak = streakData[userEmail] || {
         currentStreak: 0,
         lastLoginDate: null,
         totalDays: 0,
         awardedBooks: []
     };
     
+    console.log("📊 Existing streak data:", userStreak);
+    console.log("📅 Today:", today);
+    console.log("📅 Last login:", userStreak.lastLoginDate);
+    
     // Check if user already logged in today
     if (userStreak.lastLoginDate === today) {
+        console.log("✅ Already logged in today - no change");
         updateStreakUI(userStreak.currentStreak);
         return;
     }
@@ -201,13 +246,19 @@ function initializeStreak() {
     const yesterdayStr = yesterday.toDateString();
     
     let newStreak = 1; // Default for new or broken streak
+    let streakBroken = false;
     
     if (userStreak.lastLoginDate === yesterdayStr) {
         // Consecutive login - increase streak
         newStreak = userStreak.currentStreak + 1;
+        console.log(`🔥 Consecutive day! Streak: ${userStreak.currentStreak} → ${newStreak}`);
     } else if (userStreak.lastLoginDate) {
         // Broken streak - reset to 1
-        console.log(`Streak broken! Previous streak: ${userStreak.currentStreak} days`);
+        streakBroken = true;
+        console.log(`💔 Streak broken! Previous: ${userStreak.currentStreak} days. Reset to 1.`);
+        showToast(`💔 Streak broken! Previous streak: ${userStreak.currentStreak} days`);
+    } else {
+        console.log("🆕 First login - starting streak");
     }
     
     // Update streak data
@@ -215,22 +266,41 @@ function initializeStreak() {
     userStreak.lastLoginDate = today;
     userStreak.totalDays += 1;
     
-    streakData[currentUser.uid] = userStreak;
+    streakData[userEmail] = userStreak;
     localStorage.setItem(STREAK_STORAGE_KEY, JSON.stringify(streakData));
     
-    // Check for milestone reward (20 days)
-    if (newStreak >= 20 && !userStreak.awardedBooks.includes('20_day_streak')) {
+    console.log("💾 Saved streak:", newStreak);
+    
+    // Check for milestone reward (EXACTLY 20 days)
+    if (newStreak === 20 && !userStreak.awardedBooks.includes('20_day_streak')) {
+        console.log("🎁 20-DAY MILESTONE REACHED!");
         awardFreeBookForStreak();
         userStreak.awardedBooks.push('20_day_streak');
-        streakData[currentUser.uid] = userStreak;
+        streakData[userEmail] = userStreak;
         localStorage.setItem(STREAK_STORAGE_KEY, JSON.stringify(streakData));
     }
     
     updateStreakUI(newStreak);
+    
+    // Show success message (except if broken)
+    if (!streakBroken && newStreak > 1) {
+        showToast(`🔥 ${newStreak} day streak! Keep going!`);
+    }
+    
     return newStreak;
 }
 
+function getCurrentStreak() {
+    if (!currentUser || !currentUser.email) return 0;
+    const userEmail = currentUser.email;
+    const streakData = JSON.parse(localStorage.getItem(STREAK_STORAGE_KEY) || '{}');
+    const userStreak = streakData[userEmail] || { currentStreak: 0 };
+    return userStreak.currentStreak;
+}
+
 function updateStreakUI(streakCount) {
+    console.log("🎨 Updating UI with streak:", streakCount);
+    
     // Update all streak displays
     const streakElements = [
         'streak-count',
@@ -243,16 +313,19 @@ function updateStreakUI(streakCount) {
         const element = document.getElementById(id);
         if (element) {
             element.textContent = streakCount;
+            console.log(`✓ Updated #${id} to ${streakCount}`);
         }
     });
     
     // Show/hide streak container
     const streakContainer = document.getElementById('streak-container');
     if (streakContainer) {
-        if (streakCount > 0 && currentUser) {
+        if (currentUser && streakCount >= 0) {
             streakContainer.classList.remove('hidden');
+            console.log("✅ Showing streak container");
         } else {
             streakContainer.classList.add('hidden');
+            console.log("❌ Hiding streak container");
         }
     }
 }
@@ -262,14 +335,14 @@ function awardFreeBookForStreak() {
     const paidBooks = books.filter(book => book.type === 'Paid');
     if (paidBooks.length > 0) {
         const freeBook = paidBooks[0];
-        showToast(`🎉 Congratulations! You've earned "${freeBook.title}" for FREE!`);
+        showToast(`🎉 20-DAY STREAK! You earned "${freeBook.title}" FREE!`);
         
         // Add to library with special tag
         if (!library.find(b => b.id === freeBook.id)) {
             const rewardBook = {
                 ...freeBook,
                 type: 'Free',
-                price: 'Free (Streak Reward)',
+                price: 'Free (20-Day Streak Reward)',
                 isReward: true
             };
             library.push(rewardBook);
@@ -280,6 +353,11 @@ function awardFreeBookForStreak() {
                 renderLibrary();
             }
         }
+        
+        // Show celebration
+        setTimeout(() => {
+            alert(`🎉 CONGRATULATIONS! 🎉\n\n20-Day Reading Streak Complete!\n\n"${freeBook.title}" unlocked in your library!\n\nKeep the streak alive! 🔥`);
+        }, 500);
     }
 }
 
@@ -289,8 +367,9 @@ function openStreakPopup() {
         return;
     }
     
+    const userEmail = currentUser.email;
     const streakData = JSON.parse(localStorage.getItem(STREAK_STORAGE_KEY) || '{}');
-    const userStreak = streakData[currentUser.uid] || { currentStreak: 0 };
+    const userStreak = streakData[userEmail] || { currentStreak: 0 };
     
     document.getElementById('popup-streak-count').textContent = userStreak.currentStreak;
     document.getElementById('streak-popup').classList.remove('hidden');
@@ -440,10 +519,22 @@ function createBookCard(book) {
         </div>
     `;
 }
-
+// Add this function to check if elements exist
+function debugStreakElements() {
+    console.log("Checking streak elements...");
+    console.log("streak-count:", document.getElementById('streak-count'));
+    console.log("nav-streak-count:", document.getElementById('nav-streak-count'));
+    console.log("streak-container:", document.getElementById('streak-container'));
+    console.log("Current user:", currentUser);
+}
 // ========== AUTH & NAVIGATION ==========
 function handleLogin(role) {
-    currentUser = { role: role, name: role === 'Author' ? 'Author Name' : 'Reader' };
+    currentUser = { 
+        role: role, 
+        name: role === 'Author' ? 'Author Name' : 'Reader',
+        uid: `user_${role}_${Date.now()}`
+    };
+    
     document.getElementById('user-profile').classList.remove('hidden');
     document.getElementById('auth-controls').classList.add('hidden');
     document.getElementById('user-role-badge').innerText = role;
@@ -455,8 +546,17 @@ function handleLogin(role) {
         updateAdminView();
     }
     
-    // Initialize streak when user logs in
-    initializeStreak();
+    // Initialize and show streak
+    const streak = initializeStreak();
+     // ADD THIS LINE: Actually update the UI with the streak count
+    
+    // Force show streak container
+    const streakContainer = document.getElementById('streak-container');
+    if (streakContainer) {
+        streakContainer.classList.remove('hidden');
+    }
+    updateStreakUI(streak); // This shows it on screen
+    showToast("Welcome back! Your streak is active.");
 }
 
 function toggleAuth(state) {
@@ -468,11 +568,14 @@ function toggleAuth(state) {
         document.getElementById('admin-nav-btn').classList.add('hidden');
         document.getElementById('nav-library-btn').classList.add('hidden');
         
+        // ADD THESE 2 LINES:
+        document.getElementById('streak-container').classList.add('hidden');
+        document.getElementById('nav-streak-count').textContent = "0";
+        
         switchView('home');
         showToast("Signed out");
     }
 }
-
 function switchView(view) {
     if(view === 'library' && !currentUser) {
         showToast("Please sign in to view your library");
@@ -1016,3 +1119,41 @@ window.togglePriceField = function() {
 
 // Initialize icons
 lucide.createIcons();
+// // TEST FUNCTION - Add this at the very end
+// function testStreakNow() {
+//     console.log("=== TESTING STREAK ===");
+    
+//     // Check if elements exist
+//     const container = document.getElementById('streak-container');
+//     const count = document.getElementById('streak-count');
+    
+//     console.log("Container found:", !!container);
+//     console.log("Count element found:", !!count);
+    
+//     // Force create user and show streak
+//     currentUser = { role: 'Reader', name: 'Test User', uid: 'test123' };
+    
+//     // Manually show streak
+//     if (container) {
+//         container.classList.remove('hidden');
+//         console.log("✓ Streak shown");
+//     }
+    
+//     if (count) {
+//         count.textContent = "3";
+//         console.log("✓ Count set to 3");
+//     }
+    
+//     // Also update nav streak
+//     const navCount = document.getElementById('nav-streak-count');
+//     if (navCount) {
+//         navCount.textContent = "3";
+//         console.log("✓ Nav count set");
+//     }
+    
+//     showToast("Test streak set to 3");
+// }
+
+// // Call it after 2 seconds
+// setTimeout(testStreakNow, 2000);
+// Temporary test - remove after confirming

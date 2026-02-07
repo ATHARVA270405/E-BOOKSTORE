@@ -63,7 +63,12 @@
 //     window.location.href = "login.html";
 //   }
 // </script>
-
+<!-- Add this inside body tag -->
+<!-- <button onclick="testStreakNow()" 
+        style="position: fixed; top: 100px; left: 10px; z-index: 9999; 
+               background: red; color: white; padding: 10px; border-radius: 5px;">
+    TEST STREAK NOW
+</button> -->
 
     <!-- Navigation -->
     <nav class="fixed top-0 w-full z-50 glass-nav border-b border-orange-100">
@@ -595,7 +600,10 @@ const appId = "lumina-books-v1";
 onAuthStateChanged(auth, async (user) => {
   if (user) {
     // USER LOGGED IN
-    currentUser = { uid: user.uid };
+   currentUser = { 
+  uid: user.uid,
+  email: user.email  // ← Add this
+};
 
     document.getElementById('auth-controls').classList.add('hidden');
     document.getElementById('user-profile').classList.remove('hidden');
@@ -608,6 +616,7 @@ onAuthStateChanged(auth, async (user) => {
 
     const userData = snap.exists() ? snap.data() : {};
     document.getElementById('user-role-badge').innerText = userData.name || "Reader";
+    initializeStreak();
 
   } else {
     // USER LOGGED OUT
@@ -617,6 +626,9 @@ onAuthStateChanged(auth, async (user) => {
     document.getElementById('auth-controls').classList.remove('hidden');
     document.getElementById('nav-library-btn').classList.add('hidden');
     document.getElementById('admin-nav-btn').classList.add('hidden');
+    // In the else block (when user logs out), add:
+const streakContainer = document.getElementById('streak-container');
+if (streakContainer) streakContainer.classList.add('hidden');
   }
 });
 
