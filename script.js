@@ -1,58 +1,447 @@
+// Google Books API Configuration
+const GOOGLE_BOOKS_API_KEY = "AIzaSyDefsZqbkxZbm_bh347fMCn-Er8Aa-I3Fg"; // Replace with your actual API key
+const GOOGLE_BOOKS_API_URL = "https://www.googleapis.com/books/v1/volumes";
 
-let currentUser = null; 
+// App State
+let currentUser = window.currentUser || null; 
 let books = [];
 let library = JSON.parse(localStorage.getItem('lumina_library_v6') || '[]');
 let manualBooks = JSON.parse(localStorage.getItem('lumina_manual_books_v2') || '[]');
 let currentCategory = 'Trending';
 let accessFilter = 'all'; 
 let startIndex = 0;
-const LOAD_COUNT = 40;
+const LOAD_COUNT = 12; // Reduced to avoid rate limiting
 const ADMIN_STORAGE_KEY = "libris_local_db";
 const AUTHOR_BOOKS_KEY = "author_published_books";
 let localBooks = JSON.parse(localStorage.getItem(ADMIN_STORAGE_KEY)) || [];
 let authorBooks = JSON.parse(localStorage.getItem(AUTHOR_BOOKS_KEY)) || [];
 
-// To prevent duplicate fetching
-let lastQuery = '';
-let lastStartIndex = -1;
+// Streak System
+const STREAK_STORAGE_KEY = "reading_streak_data";
 
+// Categories
 const CATEGORIES = [
-    { id: 'Trending', label: 'Trending', icon: '🔥' },
-    { id: 'Poems', label: 'Poetry', icon: '🖋️' },
-    { id: 'Sci-Fi', label: 'Sci-Fi', icon: '🚀' },
-    { id: 'History', label: 'History', icon: '🏛️' },
-    { id: 'Philosophy', label: 'Philosophy', icon: '💭' }
+    { id: 'Trending', label: 'Trending', icon: '🔥', query: 'bestseller' },
+    { id: 'Poems', label: 'Poetry', icon: '🖋️', query: 'poetry' },
+    { id: 'Sci-Fi', label: 'Sci-Fi', icon: '🚀', query: 'science fiction' },
+    { id: 'History', label: 'History', icon: '🏛️', query: 'history' },
+    { id: 'Philosophy', label: 'Philosophy', icon: '💭', query: 'philosophy' }
 ];
 
+// Initialize App
 window.onload = () => {
     lucide.createIcons();
     renderCategories();
     renderManualBooks();
     loadAuthorBooks();
-    fetchBooks(mapCategoryToQuery(currentCategory), 0, false);
-    autoLoginFromStorage();
+    fetchBooks(CATEGORIES[0].query, 0, false);
+    
+    // Initialize streak if user is logged in
+    if (currentUser) {
+        initializeStreak();
+    }
 };
 
-function autoLoginFromStorage() {
-    const storedUser = localStorage.getItem("ebook_user");
-    if (!storedUser) return;
+// ========== GOOGLE BOOKS API FUNCTIONS ==========
+async function fetchBooks(query, index = 0, append = false) {
+    const grid = document.getElementById('book-grid');
+    const loading = document.getElementById('loading-state');
+    const loadMoreContainer = document.getElementById('load-more-container');
+    
+    if (!append) {
+        grid.innerHTML = '';
+        loading.classList.remove('hidden');
+        loadMoreContainer.classList.remove('hidden');
+    }
+    
+    try {
+        // Build API URL with proper parameters
+        const apiUrl = `${GOOGLE_BOOKS_API_URL}?q=${encodeURIComponent(query)}&startIndex=${index}&maxResults=${LOAD_COUNT}&key=${GOOGLE_BOOKS_API_KEY}&langRestrict=en`;
+        
+        const response = await fetch(apiUrl);
+        
+        if (!response.ok) {
+            if (response.status === 429) {
+                throw new Error('Rate limit exceeded. Please try again later.');
+            }
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        let apiItems = [];
+        if (data.items) {
+            apiItems = data.items
+                .filter(item => {
+                    // Filter by year (1995 or newer)
+                    const date = item.volumeInfo?.publishedDate;
+                    if (!date) return false;
+                    
+                    const year = parseInt(date.substring(0, 4));
+                    return !isNaN(year) && year >= 1995;
+                })
+                .map((item, idx) => {
+                    const volumeInfo = item.volumeInfo || {};
+                    const saleInfo = item.saleInfo || {};
+                    
+                    // Determine if book is free
+                    const isFreeByAPI = saleInfo.saleability === 'FREE' || 
+                                      saleInfo.saleability === 'NOT_FOR_SALE' ||
+                                      (volumeInfo.previewLink && volumeInfo.previewLink.includes('preview=true'));
+                    
+                    // Use random distribution for demo (2/3 free, 1/3 paid)
+                    const accessType = isFreeByAPI ? 'Free' : (idx % 3 === 0 ? 'Paid' : 'Free');
+                    
+                    // Generate Indian Rupee price for paid books
+                    const price = accessType === 'Paid' ? 
+                        `₹${Math.floor(Math.random() * 500) + 199}` : 'Free';
+                    
+                    return {
+                        id: item.id,
+                        title: volumeInfo.title || 'Untitled',
+                        author: volumeInfo.authors?.[0] || 'Unknown Author',
+                        cover: volumeInfo.imageLinks?.thumbnail?.replace('http:', 'https:') || 
+                               volumeInfo.imageLinks?.smallThumbnail?.replace('http:', 'https:') ||
+                               'https://images.unsplash.com/photo-1543004218-ee14110497f9?q=80&w=400',
+                        type: accessType,
+                        price: price,
+                        link: volumeInfo.previewLink || volumeInfo.infoLink || '#',
+                        isManual: false,
+                        description: volumeInfo.description || 'No description available.',
+                        publisher: volumeInfo.publisher || 'Unknown Publisher',
+                        publishedDate: volumeInfo.publishedDate || 'Unknown Year',
+                        pageCount: volumeInfo.pageCount || 'N/A'
+                    };
+                });
+        } else {
+            // No items found
+            if (!append) {
+                grid.innerHTML = `
+                    <div class="col-span-full py-20 text-center">
+                        <i data-lucide="search-x" class="w-12 h-12 mx-auto text-slate-300 mb-4"></i>
+                        <p class="text-slate-500 font-medium">No books found for "${query}"</p>
+                    </div>`;
+                lucide.createIcons();
+                loading.classList.add('hidden');
+                return;
+            }
+        }
 
-    const user = JSON.parse(storedUser);
-    handleLogin(user.role || "Reader");
+        // Apply access filter
+        let filteredApiItems = apiItems;
+        if (accessFilter === 'free') {
+            filteredApiItems = apiItems.filter(b => b.type === 'Free');
+        } else if (accessFilter === 'paid') {
+            filteredApiItems = apiItems.filter(b => b.type === 'Paid');
+        }
+
+        // Combine with manual books for 'all' filter
+        let combinedItems = filteredApiItems;
+        if (accessFilter === 'all' && !append && index === 0) {
+            combinedItems = [...manualBooks, ...filteredApiItems];
+        }
+
+        if (!append) {
+            books = combinedItems;
+            renderBooks(combinedItems, false);
+        } else {
+            books = [...books, ...combinedItems];
+            renderBooks(combinedItems, true);
+        }
+        
+        startIndex = index + LOAD_COUNT;
+        
+        // Hide load more button if no more results
+        if (!data.items || data.items.length < LOAD_COUNT) {
+            loadMoreContainer.classList.add('hidden');
+        }
+        
+    } catch (err) { 
+        console.error("Fetch error:", err); 
+        
+        // Show error message
+        if (!append) {
+            grid.innerHTML = `
+                <div class="col-span-full py-20 text-center">
+                    <i data-lucide="wifi-off" class="w-12 h-12 mx-auto text-slate-300 mb-4"></i>
+                    <p class="text-slate-500 font-medium mb-4">Unable to fetch books</p>
+                    <p class="text-sm text-slate-400">${err.message || 'Please check your connection'}</p>
+                </div>`;
+            lucide.createIcons();
+        }
+        
+        showToast("Error fetching books. Please try again.");
+    } finally { 
+        loading.classList.add('hidden'); 
+    }
 }
 
-function mapCategoryToQuery(cat) {
-    const map = {
-        'Trending': 'bestseller OR popular books',
-        'Poems': 'modern poetry',
-        'Sci-Fi': 'science fiction OR futuristic',
-        'History': 'modern history',
-        'Philosophy': 'contemporary philosophy'
+// ========== STREAK SYSTEM ==========
+function initializeStreak() {
+    if (!currentUser) return;
+    
+    const today = new Date().toDateString();
+    const streakData = JSON.parse(localStorage.getItem(STREAK_STORAGE_KEY) || '{}');
+    const userStreak = streakData[currentUser.uid] || {
+        currentStreak: 0,
+        lastLoginDate: null,
+        totalDays: 0,
+        awardedBooks: []
     };
-    return map[cat] || cat;
+    
+    // Check if user already logged in today
+    if (userStreak.lastLoginDate === today) {
+        updateStreakUI(userStreak.currentStreak);
+        return;
+    }
+    
+    // Check if yesterday login (consecutive)
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toDateString();
+    
+    let newStreak = 1; // Default for new or broken streak
+    
+    if (userStreak.lastLoginDate === yesterdayStr) {
+        // Consecutive login - increase streak
+        newStreak = userStreak.currentStreak + 1;
+    } else if (userStreak.lastLoginDate) {
+        // Broken streak - reset to 1
+        console.log(`Streak broken! Previous streak: ${userStreak.currentStreak} days`);
+    }
+    
+    // Update streak data
+    userStreak.currentStreak = newStreak;
+    userStreak.lastLoginDate = today;
+    userStreak.totalDays += 1;
+    
+    streakData[currentUser.uid] = userStreak;
+    localStorage.setItem(STREAK_STORAGE_KEY, JSON.stringify(streakData));
+    
+    // Check for milestone reward (20 days)
+    if (newStreak >= 20 && !userStreak.awardedBooks.includes('20_day_streak')) {
+        awardFreeBookForStreak();
+        userStreak.awardedBooks.push('20_day_streak');
+        streakData[currentUser.uid] = userStreak;
+        localStorage.setItem(STREAK_STORAGE_KEY, JSON.stringify(streakData));
+    }
+    
+    updateStreakUI(newStreak);
+    return newStreak;
 }
 
-// --- AUTH & NAVIGATION ---
+function updateStreakUI(streakCount) {
+    // Update all streak displays
+    const streakElements = [
+        'streak-count',
+        'nav-streak-count',
+        'popup-streak-count',
+        'lib-streak-val'
+    ];
+    
+    streakElements.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = streakCount;
+        }
+    });
+    
+    // Show/hide streak container
+    const streakContainer = document.getElementById('streak-container');
+    if (streakContainer) {
+        if (streakCount > 0 && currentUser) {
+            streakContainer.classList.remove('hidden');
+        } else {
+            streakContainer.classList.add('hidden');
+        }
+    }
+}
+
+function awardFreeBookForStreak() {
+    // Find a paid book to award as free
+    const paidBooks = books.filter(book => book.type === 'Paid');
+    if (paidBooks.length > 0) {
+        const freeBook = paidBooks[0];
+        showToast(`🎉 Congratulations! You've earned "${freeBook.title}" for FREE!`);
+        
+        // Add to library with special tag
+        if (!library.find(b => b.id === freeBook.id)) {
+            const rewardBook = {
+                ...freeBook,
+                type: 'Free',
+                price: 'Free (Streak Reward)',
+                isReward: true
+            };
+            library.push(rewardBook);
+            localStorage.setItem('lumina_library_v6', JSON.stringify(library));
+            
+            // Update library view if open
+            if (document.getElementById('library-view') && !document.getElementById('library-view').classList.contains('hidden')) {
+                renderLibrary();
+            }
+        }
+    }
+}
+
+function openStreakPopup() {
+    if (!currentUser) {
+        showToast("Please sign in to view your streak");
+        return;
+    }
+    
+    const streakData = JSON.parse(localStorage.getItem(STREAK_STORAGE_KEY) || '{}');
+    const userStreak = streakData[currentUser.uid] || { currentStreak: 0 };
+    
+    document.getElementById('popup-streak-count').textContent = userStreak.currentStreak;
+    document.getElementById('streak-popup').classList.remove('hidden');
+}
+
+function closeStreakPopup() {
+    document.getElementById('streak-popup').classList.add('hidden');
+}
+
+function goToFreePaidBooks() {
+    closeStreakPopup();
+    setAccessFilter('paid');
+    scrollToSearch();
+}
+
+// ========== BOOK MANAGEMENT FUNCTIONS ==========
+function handleCategoryClick(catId) {
+    const category = CATEGORIES.find(c => c.id === catId);
+    if (!category) return;
+    
+    currentCategory = catId;
+    renderCategories();
+    fetchBooks(category.query, 0, false);
+}
+
+function handleSearch(e) { 
+    e.preventDefault(); 
+    const query = document.getElementById('search-input').value;
+    if (query.trim()) {
+        fetchBooks(query, 0, false);
+    }
+}
+
+function setAccessFilter(type) {
+    accessFilter = type;
+    
+    // Update UI Button Styles
+    const filters = ['all', 'free', 'paid', 'admin'];
+    filters.forEach(f => {
+        const btn = document.getElementById(`filter-${f}`);
+        if (btn) {
+            if (f === type) {
+                btn.className = "text-left px-4 py-2.5 rounded-xl text-sm font-bold bg-amber-600 text-white shadow-md";
+            } else {
+                btn.className = "text-left px-4 py-2.5 rounded-xl text-sm font-bold text-slate-600 hover:bg-orange-50";
+            }
+        }
+    });
+
+    // Reset and fetch based on filter
+    if (type === 'admin') {
+        renderAdminBooksOnly();
+    } else {
+        const category = CATEGORIES.find(c => c.id === currentCategory);
+        fetchBooks(category ? category.query : 'books', 0, false);
+    }
+}
+
+function renderAdminBooksOnly() {
+    const grid = document.getElementById('book-grid');
+    const loading = document.getElementById('loading-state');
+    const loadMoreContainer = document.getElementById('load-more-container');
+    
+    loading.classList.add('hidden');
+    loadMoreContainer.classList.add('hidden');
+    
+    if (localBooks.length === 0) {
+        grid.innerHTML = `
+            <div class="col-span-full py-20 text-center">
+                <i data-lucide="archive" class="w-12 h-12 mx-auto text-slate-300 mb-4"></i>
+                <p class="text-slate-500 font-medium">No admin books added yet.</p>
+            </div>`;
+    } else {
+        grid.innerHTML = localBooks.map(book => `
+            <div class="book-card group relative bg-white border border-indigo-50 rounded-[2rem] overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-300">
+                <div class="aspect-[3/4.2] overflow-hidden bg-indigo-50 relative">
+                    <div class="w-full h-full flex items-center justify-center">
+                        <i data-lucide="book-open" class="w-16 h-16 text-indigo-300"></i>
+                    </div>
+                    <div class="absolute top-4 left-4 z-10 flex flex-col gap-2">
+                        <span class="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-indigo-600 text-white">
+                            ADMIN ORIGINAL
+                        </span>
+                    </div>
+                    <div class="absolute inset-0 bg-slate-900/80 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-center items-center p-6 gap-3">
+                        <button onclick="openLocalPdf('${book.id}')" class="w-full py-4 bg-white text-slate-900 rounded-2xl font-bold text-xs hover:bg-indigo-600 hover:text-white transition-all">
+                            Read Now
+                        </button>
+                        <button onclick="saveAdminToLibrary('${book.id}')" class="w-full py-4 bg-slate-800 text-white rounded-2xl font-bold text-xs hover:bg-slate-700 transition-all">
+                            Add to Shelf
+                        </button>
+                    </div>
+                </div>
+                <div class="p-6">
+                    <h3 class="font-serif font-bold text-slate-800 line-clamp-1 mb-1 text-lg">${book.name}</h3>
+                    <p class="text-slate-500 text-xs italic">by ${book.author}</p>
+                </div>
+            </div>
+        `).join("");
+    }
+    
+    lucide.createIcons();
+}
+
+function renderBooks(items, append) {
+    const grid = document.getElementById('book-grid');
+    const html = items.map(book => createBookCard(book)).join('');
+    
+    if (append) {
+        grid.innerHTML += html;
+    } else {
+        grid.innerHTML = html;
+    }
+    
+    lucide.createIcons();
+}
+
+function createBookCard(book) {
+    const badgeClass = book.type === 'Free' ? 'badge-free' : 'badge-paid';
+    const badgeText = book.type === 'Free' ? 'Free' : book.price;
+    
+    return `
+        <div class="book-card group relative bg-white border border-orange-50 rounded-[2rem] overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-300">
+            <div class="aspect-[3/4.2] overflow-hidden bg-orange-50 relative">
+                <img src="${book.cover}" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                     onerror="this.src='https://images.unsplash.com/photo-1543004218-ee14110497f9?q=80&w=400'">
+                <div class="absolute top-4 left-4 z-10 flex flex-col gap-2">
+                    <span class="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${badgeClass}">
+                        ${badgeText}
+                    </span>
+                    ${book.isManual ? '<span class="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-slate-900 text-white border border-white/20">Official Entry</span>' : ''}
+                    ${book.isReward ? '<span class="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-green-600 text-white">🎁 Free Reward</span>' : ''}
+                </div>
+                <div class="absolute inset-0 bg-slate-900/80 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-center items-center p-6 gap-3">
+                    <button onclick="handleBookAction('${book.id}')" class="w-full py-4 bg-white text-slate-900 rounded-2xl font-bold text-xs hover:bg-amber-600 hover:text-white transition-all">
+                        ${book.type === 'Free' ? 'Read Now' : 'Inquire (₹)'}
+                    </button>
+                    <button onclick="saveToLibrary('${book.id}')" class="w-full py-4 bg-slate-800 text-white rounded-2xl font-bold text-xs hover:bg-slate-700 transition-all">
+                        Add to Shelf
+                    </button>
+                </div>
+            </div>
+            <div class="p-6">
+                <h3 class="font-serif font-bold text-slate-800 line-clamp-1 mb-1 text-lg">${book.title}</h3>
+                <p class="text-slate-500 text-xs italic">by ${book.author}</p>
+            </div>
+        </div>
+    `;
+}
+
+// ========== AUTH & NAVIGATION ==========
 function handleLogin(role) {
     currentUser = { role: role, name: role === 'Author' ? 'Author Name' : 'Reader' };
     document.getElementById('user-profile').classList.remove('hidden');
@@ -65,6 +454,9 @@ function handleLogin(role) {
         adminBtn.classList.remove('hidden');
         updateAdminView();
     }
+    
+    // Initialize streak when user logs in
+    initializeStreak();
 }
 
 function toggleAuth(state) {
@@ -103,7 +495,7 @@ function switchView(view) {
     window.scrollTo(0,0);
 }
 
-// --- PUBLISH FUNCTION - Fixed PDF handling ---
+// ========== PUBLISH FUNCTION ==========
 function handlePublish(e) { 
     e.preventDefault(); 
     
@@ -230,7 +622,7 @@ function saveBookToStorage(title, listingType, price, pdfData, coverData) {
     }, 2000);
 }
 
-// --- ADMIN & LIBRARY FUNCTIONS ---
+// ========== ADMIN & LIBRARY FUNCTIONS ==========
 function updateAdminPreview() {
     const title = document.getElementById('admin-title').value || 'Book Title';
     const author = document.getElementById('admin-author').value || 'Author Name';
@@ -316,204 +708,6 @@ function scrollToSearch() {
     document.getElementById('search-anchor').scrollIntoView({ behavior: 'smooth' });
 }
 
-function setAccessFilter(type) {
-    accessFilter = type;
-    
-    // Update UI Button Styles
-    const filters = ['all', 'free', 'paid', 'admin'];
-    filters.forEach(f => {
-        const btn = document.getElementById(`filter-${f}`);
-        if (f === type) {
-            btn.className = "text-left px-4 py-2.5 rounded-xl text-sm font-bold bg-amber-600 text-white shadow-md";
-        } else {
-            btn.className = "text-left px-4 py-2.5 rounded-xl text-sm font-bold text-slate-600 hover:bg-orange-50";
-        }
-    });
-
-    // Reset and fetch based on filter
-    if (type === 'admin') {
-        // Show only admin/original books
-        renderAdminBooksOnly();
-    } else {
-        // Show Google Books with filter
-        fetchBooks(mapCategoryToQuery(currentCategory), 0, false);
-    }
-}
-
-function renderAdminBooksOnly() {
-    const grid = document.getElementById('book-grid');
-    const loading = document.getElementById('loading-state');
-    const localData = JSON.parse(localStorage.getItem("libris_local_db")) || [];
-    
-    loading.classList.add('hidden');
-    
-    if (localData.length === 0) {
-        grid.innerHTML = `
-            <div class="col-span-full py-20 text-center">
-                <i data-lucide="archive" class="w-12 h-12 mx-auto text-slate-300 mb-4"></i>
-                <p class="text-slate-500 font-medium">No admin books added yet.</p>
-            </div>`;
-    } else {
-        grid.innerHTML = localData.map(book => `
-            <div class="book-card group relative bg-white border border-indigo-50 rounded-[2rem] overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-300">
-                <div class="aspect-[3/4.2] overflow-hidden bg-indigo-50 relative">
-                    <div class="w-full h-full flex items-center justify-center">
-                        <i data-lucide="book-open" class="w-16 h-16 text-indigo-300"></i>
-                    </div>
-                    <div class="absolute top-4 left-4 z-10 flex flex-col gap-2">
-                        <span class="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-indigo-600 text-white">
-                            ADMIN ORIGINAL
-                        </span>
-                    </div>
-                    <div class="absolute inset-0 bg-slate-900/80 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-center items-center p-6 gap-3">
-                        <button onclick="openLocalPdf('${book.id}')" class="w-full py-4 bg-white text-slate-900 rounded-2xl font-bold text-xs hover:bg-indigo-600 hover:text-white transition-all">
-                            Read Now
-                        </button>
-                        <button onclick="saveAdminToLibrary('${book.id}')" class="w-full py-4 bg-slate-800 text-white rounded-2xl font-bold text-xs hover:bg-slate-700 transition-all">
-                            Add to Shelf
-                        </button>
-                    </div>
-                </div>
-                <div class="p-6">
-                    <h3 class="font-serif font-bold text-slate-800 line-clamp-1 mb-1 text-lg">${book.name}</h3>
-                    <p class="text-slate-500 text-xs italic">by ${book.author}</p>
-                </div>
-            </div>
-        `).join("");
-    }
-    
-    // Hide load more button for admin view
-    document.getElementById('load-more-container').classList.add('hidden');
-    lucide.createIcons();
-}
-
-async function fetchBooks(query, index = 0, append = false) {
-    // Prevent duplicate calls with same parameters
-    if (lastQuery === query && lastStartIndex === index && !append) {
-        return;
-    }
-    
-    const grid = document.getElementById('book-grid');
-    const loading = document.getElementById('loading-state');
-    const loadMoreContainer = document.getElementById('load-more-container');
-    
-    if (!append) {
-        grid.innerHTML = '';
-        loading.classList.remove('hidden');
-        loadMoreContainer.classList.remove('hidden');
-    }
-    
-    lastQuery = query;
-    lastStartIndex = index;
-
-    try {
-        const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&orderBy=newest&printType=books&langRestrict=en&startIndex=${index}&maxResults=${LOAD_COUNT}`;
-
-        const response = await fetch(url);
-        const data = await response.json();
-        
-        let apiItems = [];
-        if (data.items) {
-            apiItems = data.items
-                .filter(item => {
-                    const date = item.volumeInfo?.publishedDate;
-                    if (!date) return false;
-
-                    const year = parseInt(date);
-                    return !isNaN(year) && year >= 1995;
-                })
-                .map((item, idx) => {
-                    const isFreeByAPI = item.saleInfo?.saleability === 'FREE_BOOKS';
-                    const accessType = (isFreeByAPI || idx % 4 !== 0) ? 'Free' : 'Paid';
-
-                    return {
-                        id: item.id,
-                        title: item.volumeInfo.title,
-                        author: item.volumeInfo.authors?.[0] || 'Unknown Author',
-                        cover: item.volumeInfo.imageLinks?.thumbnail?.replace('http:', 'https:') || 'https://images.unsplash.com/photo-1543004218-ee14110497f9?q=80&w=400',
-                        type: accessType,
-                        price: accessType === 'Paid' ? '₹' + Math.floor(Math.random() * 500 + 199) : 'Free',
-                        link: item.volumeInfo.previewLink,
-                        isManual: false
-                    };
-                });
-        }
-
-        // Apply access filter to API books
-        let filteredApiItems = apiItems;
-        if (accessFilter === 'free') {
-            filteredApiItems = apiItems.filter(b => b.type === 'Free');
-        } else if (accessFilter === 'paid') {
-            filteredApiItems = apiItems.filter(b => b.type === 'Paid');
-        }
-
-        // Combine with manual books for 'all' filter
-        let combinedItems = filteredApiItems;
-        if (accessFilter === 'all' && !append && index === 0) {
-            combinedItems = [...manualBooks, ...filteredApiItems];
-        }
-
-        if (!append) {
-            books = combinedItems;
-        } else {
-            books = [...books, ...combinedItems];
-        }
-        
-        renderBooks(combinedItems, append);
-        startIndex = index + LOAD_COUNT;
-        
-    } catch (err) { 
-        console.error(err); 
-        showToast("Error fetching books");
-    } finally { 
-        loading.classList.add('hidden'); 
-    }
-}
-
-function renderBooks(items, append) {
-    const grid = document.getElementById('book-grid');
-    const html = items.map(book => createBookCard(book)).join('');
-    
-    if (append) {
-        grid.innerHTML += html;
-    } else {
-        grid.innerHTML = html;
-    }
-    
-    lucide.createIcons();
-}
-
-function createBookCard(book) {
-    const badgeClass = book.type === 'Free' ? 'badge-free' : 'badge-paid';
-    const badgeText = book.type === 'Free' ? 'Free' : book.price;
-    
-    return `
-        <div class="book-card group relative bg-white border border-orange-50 rounded-[2rem] overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-300">
-            <div class="aspect-[3/4.2] overflow-hidden bg-orange-50 relative">
-                <img src="${book.cover}" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700">
-                <div class="absolute top-4 left-4 z-10 flex flex-col gap-2">
-                    <span class="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${badgeClass}">
-                        ${badgeText}
-                    </span>
-                    ${book.isManual ? '<span class="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-slate-900 text-white border border-white/20">Official Entry</span>' : ''}
-                </div>
-                <div class="absolute inset-0 bg-slate-900/80 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-center items-center p-6 gap-3">
-                    <button onclick="handleBookAction('${book.id}')" class="w-full py-4 bg-white text-slate-900 rounded-2xl font-bold text-xs hover:bg-amber-600 hover:text-white transition-all">
-                        ${book.type === 'Free' ? 'Read Now' : 'Inquire (₹)'}
-                    </button>
-                    <button onclick="saveToLibrary('${book.id}')" class="w-full py-4 bg-slate-800 text-white rounded-2xl font-bold text-xs hover:bg-slate-700 transition-all">
-                        Add to Shelf
-                    </button>
-                </div>
-            </div>
-            <div class="p-6">
-                <h3 class="font-serif font-bold text-slate-800 line-clamp-1 mb-1 text-lg">${book.title}</h3>
-                <p class="text-slate-500 text-xs italic">by ${book.author}</p>
-            </div>
-        </div>
-    `;
-}
-
 function handleBookAction(id) {
     const book = books.find(b => b.id === id) || library.find(b => b.id === id);
     if(!book) return;
@@ -580,20 +774,6 @@ function renderLibrary() {
     lucide.createIcons();
 }
 
-function handleCategoryClick(catId) {
-    currentCategory = catId;
-    renderCategories();
-    fetchBooks(mapCategoryToQuery(catId), 0, false);
-}
-
-function handleSearch(e) { 
-    e.preventDefault(); 
-    const query = document.getElementById('search-input').value;
-    if (query.trim()) {
-        fetchBooks(query, 0, false);
-    }
-}
-
 function renderCategories() {
     const container = document.getElementById('category-list');
     container.innerHTML = CATEGORIES.map(cat => `
@@ -622,10 +802,11 @@ function handleContactAdmin(e) {
 }
 
 function loadMore() {
-    fetchBooks(mapCategoryToQuery(currentCategory), startIndex, true);
+    const category = CATEGORIES.find(c => c.id === currentCategory);
+    fetchBooks(category ? category.query : 'books', startIndex, true);
 }
 
-// Chatbot Logic
+// ========== CHATBOT LOGIC ==========
 function toggleChatbot() {
     const win = document.getElementById('chatbot-window');
     const openIcon = document.getElementById('chat-icon-open');
@@ -677,15 +858,15 @@ function getBotReply(message) {
     }
 
     if (msg.includes('latest') || msg.includes('new')) {
-        return "We show modern ebooks (2005+). Try the Trending category 🔥";
+        return "We show modern ebooks (1995+). Try the Trending category 🔥";
     }
 
     if (msg.includes('login') || msg.includes('sign')) {
-        return "Sign in using your mobile number to save books & maintain streaks 🔐";
+        return "Sign in using your email to save books & maintain streaks 🔐";
     }
 
     if (msg.includes('streak')) {
-        return "Your reading streak increases every day you log in 📆🔥";
+        return "Your reading streak increases every day you log in 📆🔥 Complete 20 days for a free book!";
     }
 
     if (msg.includes('library') || msg.includes('shelf')) {
@@ -716,7 +897,6 @@ function renderManualBooks() {
     localBooks = JSON.parse(localStorage.getItem(ADMIN_STORAGE_KEY)) || [];
 }
 
-// Load author books
 function loadAuthorBooks() {
     authorBooks = JSON.parse(localStorage.getItem(AUTHOR_BOOKS_KEY)) || [];
 }
@@ -789,3 +969,50 @@ window.openPdfViewer = function(pdfData, title) {
         </html>
     `);
 };
+
+// Export all functions to global scope
+window.initializeStreak = initializeStreak;
+window.openStreakPopup = openStreakPopup;
+window.closeStreakPopup = closeStreakPopup;
+window.goToFreePaidBooks = goToFreePaidBooks;
+window.switchView = switchView;
+window.scrollToSearch = scrollToSearch;
+window.handleSearch = handleSearch;
+window.setAccessFilter = setAccessFilter;
+window.handleCategoryClick = handleCategoryClick;
+window.showToast = showToast;
+window.handleLogin = handleLogin;
+window.toggleAuth = toggleAuth;
+window.handlePublish = handlePublish;
+window.updateAdminPreview = updateAdminPreview;
+window.handleAdminManualAdd = handleAdminManualAdd;
+window.deleteManualBook = deleteManualBook;
+window.updateAdminView = updateAdminView;
+window.handleBookAction = handleBookAction;
+window.saveToLibrary = saveToLibrary;
+window.saveAdminToLibrary = saveAdminToLibrary;
+window.renderLibrary = renderLibrary;
+window.closeContactModal = closeContactModal;
+window.handleContactAdmin = handleContactAdmin;
+window.loadMore = loadMore;
+window.toggleChatbot = toggleChatbot;
+window.handleChatSubmit = handleChatSubmit;
+window.sendQuickMsg = sendQuickMsg;
+window.openLocalPdf = openLocalPdf;
+window.togglePriceField = function() {
+    const listingType = document.getElementById("listingType").value;
+    const priceField = document.getElementById("priceField");
+    const priceInput = document.getElementById("bookPrice");
+
+    if (listingType === "Paid") {
+        priceField.classList.remove("hidden");
+        priceInput.required = true;
+    } else {
+        priceField.classList.add("hidden");
+        priceInput.required = false;
+        priceInput.value = "";
+    }
+};
+
+// Initialize icons
+lucide.createIcons();
