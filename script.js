@@ -115,7 +115,7 @@ async function fetchBooks(query, index = 0, append = false) {
                                       (volumeInfo.previewLink && volumeInfo.previewLink.includes('preview=true'));
                     
                     // Use random distribution for demo (2/3 free, 1/3 paid)
-                    const accessType = isFreeByAPI ? 'Free' : (idx % 3 === 0 ? 'Paid' : 'Free');
+                    const accessType = isFreeByAPI ? 'Free' : (idx % 2 === 0 ? 'Paid' : 'Free');
                     
                     // Generate Indian Rupee price for paid books
                     const price = accessType === 'Paid' ? 
