@@ -360,7 +360,68 @@ function awardFreeBookForStreak() {
         }, 500);
     }
 }
-
+// Function to display the reward book in streak popup
+function displayStreakRewardBook(userStreak) {
+    const bookPreview = document.getElementById('streak-book-preview');
+    
+    // Get all paid books from current collection
+    let paidBooks = books.filter(book => book.type === 'Paid');
+    
+    // If no paid books in current view, try to get from all sources
+    if (paidBooks.length === 0) {
+        paidBooks = manualBooks.filter(book => book.type === 'Paid');
+    }
+    
+    if (paidBooks.length === 0) {
+        // No paid books available - hide preview
+        if (bookPreview) {
+            bookPreview.style.display = 'none';
+        }
+        return;
+    }
+    
+    // Determine which book to show based on user's awarded books
+    let rewardBook;
+    
+    if (userStreak.currentStreak >= 20 && !userStreak.awardedBooks.includes('20_day_streak')) {
+        // User is at 20+ days and hasn't received reward yet - show what they'll get NOW
+        rewardBook = paidBooks[0];
+    } else if (userStreak.awardedBooks.includes('20_day_streak')) {
+        // User already got their first reward - show next potential reward
+        rewardBook = paidBooks[Math.min(1, paidBooks.length - 1)];
+    } else {
+        // User is building streak - show first book as motivation
+        rewardBook = paidBooks[0];
+    }
+    
+    // Update the UI with book details
+    const coverImg = document.getElementById('streak-book-cover');
+    const titleElem = document.getElementById('streak-book-title');
+    const authorElem = document.getElementById('streak-book-author');
+    const priceElem = document.getElementById('streak-book-price');
+    
+    if (coverImg && titleElem && authorElem && priceElem) {
+        coverImg.src = rewardBook.cover || 'https://images.unsplash.com/photo-1543004218-ee14110497f9?q=80&w=400';
+        coverImg.alt = rewardBook.title;
+        
+        titleElem.textContent = rewardBook.title;
+        authorElem.textContent = `by ${rewardBook.author}`;
+        priceElem.textContent = `Worth: ${rewardBook.price}`;
+        
+        // Show the preview
+        bookPreview.style.display = 'block';
+        
+        // Add special styling if user can claim it NOW
+        if (userStreak.currentStreak >= 20 && !userStreak.awardedBooks.includes('20_day_streak')) {
+            bookPreview.classList.add('animate-pulse');
+            priceElem.textContent = `🎉 UNLOCKED! Worth: ${rewardBook.price}`;
+            priceElem.classList.add('text-green-600');
+        } else {
+            bookPreview.classList.remove('animate-pulse');
+            priceElem.classList.remove('text-green-600');
+        }
+    }
+}
 function openStreakPopup() {
     if (!currentUser) {
         showToast("Please sign in to view your streak");
@@ -369,10 +430,17 @@ function openStreakPopup() {
     
     const userEmail = currentUser.email;
     const streakData = JSON.parse(localStorage.getItem(STREAK_STORAGE_KEY) || '{}');
-    const userStreak = streakData[userEmail] || { currentStreak: 0 };
+    const userStreak = streakData[userEmail] || { currentStreak: 0, awardedBooks: [] };
     
     document.getElementById('popup-streak-count').textContent = userStreak.currentStreak;
+    
+    // Get and display the reward book
+    displayStreakRewardBook(userStreak);
+    
     document.getElementById('streak-popup').classList.remove('hidden');
+    
+    // Refresh Lucide icons after showing popup
+    setTimeout(() => lucide.createIcons(), 100);
 }
 
 function closeStreakPopup() {
@@ -1157,3 +1225,4 @@ lucide.createIcons();
 // // Call it after 2 seconds
 // setTimeout(testStreakNow, 2000);
 // Temporary test - remove after confirming
+window.displayStreakRewardBook = displayStreakRewardBook;
