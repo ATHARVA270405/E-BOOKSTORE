@@ -67,6 +67,7 @@ function getCurrentStreak() {
     const userStreak = streakData[currentUser.uid] || { currentStreak: 0 };
     return userStreak.currentStreak;
 }
+
 // ========== GOOGLE BOOKS API FUNCTIONS ==========
 async function fetchBooks(query, index = 0, append = false) {
     const grid = document.getElementById('book-grid');

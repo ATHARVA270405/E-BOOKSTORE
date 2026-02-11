@@ -63,12 +63,8 @@
 //     window.location.href = "login.html";
 //   }
 // </script>
-<!-- Add this inside body tag -->
-<!-- <button onclick="testStreakNow()" 
-        style="position: fixed; top: 100px; left: 10px; z-index: 9999; 
-               background: red; color: white; padding: 10px; border-radius: 5px;">
-    TEST STREAK NOW
-</button> -->
+
+
 
     <!-- Navigation -->
     <nav class="fixed top-0 w-full z-50 glass-nav border-b border-orange-100">
@@ -107,24 +103,24 @@
                 <div id="auth-controls" class="flex gap-2">
                    <div id="auth-controls" class="flex gap-2 items-center">
 
-    <!-- STREAK BUTTON -->
-    <button onclick="openStreakPopup()" 
-        class="flex items-center gap-1 px-4 py-2 bg-orange-100 text-orange-700 rounded-full border border-orange-200 hover:scale-105 transition">
-        <i data-lucide="flame" class="w-4 h-4 text-orange-500"></i>
-        <span id="nav-streak-count" class="text-sm font-bold">0</span>
-    </button>
+        <!-- STREAK BUTTON -->
+        <button onclick="openStreakPopup()" 
+         class="flex items-center gap-1 px-4 py-2 bg-orange-100 text-orange-700 rounded-full border border-orange-200 hover:scale-105 transition">
+         <i data-lucide="flame" class="w-4 h-4 text-orange-500"></i>
+         <span id="nav-streak-count" class="text-sm font-bold">0</span>
+        </button>
 
-    <button onclick="window.location.href='login.html'"
-        class="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold rounded-full transition-all shadow-lg">
-        Sign In
-    </button>
+          <button onclick="window.location.href='login.html'"
+            class="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold rounded-full transition-all shadow-lg">
+            Sign In
+         </button>
 
-    <button onclick="window.location.href='admin.html'"
-        class="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-full transition-all shadow-lg">
-        Admin
-    </button>
+         <button onclick="window.location.href='admin.html'"
+            class="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-full transition-all shadow-lg">
+           Admin
+         </button>
 
-</div>
+           </div>
 
                 </div>
                 
@@ -150,7 +146,7 @@
                     Explore a curated collection of thousands of digital books at <strong>E-BOOK STORE</strong>. From rare classics to modern masterpieces, read for free or support authors directly.
                 </p>
                 <div class="flex flex-wrap gap-4 pt-4">
-                    <button onclick="scrollToSearch()" class="px-8 py-4 bg-amber-600 hover:bg-slate-900 text-white font-bold rounded-2xl transition-all shadow-xl shadow-amber-200 flex items-center gap-3">
+                    <button onclick="switchView('library')" class="px-8 py-4 bg-amber-600 hover:bg-slate-900 text-white font-bold rounded-2xl transition-all shadow-xl shadow-amber-200 flex items-center gap-3">
                         Browse Library <i data-lucide="arrow-right" class="w-5 h-5"></i>
                     </button>
                     <button onclick="switchView('publish')" class="px-8 py-4 bg-white border-2 border-orange-100 text-slate-800 font-bold rounded-2xl hover:bg-orange-50 transition-all">
